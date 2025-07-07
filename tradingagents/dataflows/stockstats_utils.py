@@ -36,13 +36,20 @@ class StockstatsUtils:
                         f"{symbol}-YFin-data-2015-01-01-2025-03-25.csv",
                     )
                 )
+                # 确保 Date 列是字符串格式
+                if 'Date' in data.columns:
+                    if data['Date'].dtype != 'object':
+                        data['Date'] = pd.to_datetime(data['Date']).dt.strftime('%Y-%m-%d')
+                    elif not isinstance(data['Date'].iloc[0], str):
+                        data['Date'] = pd.to_datetime(data['Date']).dt.strftime('%Y-%m-%d')
+                
                 df = wrap(data)
             except FileNotFoundError:
                 raise Exception("Stockstats fail: Yahoo Finance data not fetched yet!")
         else:
             # Get today's date as YYYY-mm-dd to add to cache
             today_date = pd.Timestamp.today()
-            curr_date = pd.to_datetime(curr_date)
+            curr_date_dt = pd.to_datetime(curr_date)
 
             end_date = today_date
             start_date = today_date - pd.DateOffset(years=15)
@@ -60,7 +67,11 @@ class StockstatsUtils:
 
             if os.path.exists(data_file):
                 data = pd.read_csv(data_file)
-                data["Date"] = pd.to_datetime(data["Date"])
+                # 检查 Date 列的类型
+                if 'Date' in data.columns:
+                    # 如果是字符串，先转为 datetime
+                    if data['Date'].dtype == 'object':
+                        data['Date'] = pd.to_datetime(data['Date'])
             else:
                 data = yf.download(
                     symbol,
@@ -73,12 +84,28 @@ class StockstatsUtils:
                 data = data.reset_index()
                 data.to_csv(data_file, index=False)
 
+            # 确保 Date 列存在并转换为字符串格式
+            if 'Date' in data.columns:
+                data['Date'] = pd.to_datetime(data['Date']).dt.strftime("%Y-%m-%d")
+            
             df = wrap(data)
-            df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
-            curr_date = curr_date.strftime("%Y-%m-%d")
+            curr_date = curr_date_dt.strftime("%Y-%m-%d")
 
         df[indicator]  # trigger stockstats to calculate the indicator
-        matching_rows = df[df["Date"].str.startswith(curr_date)]
+        
+        # 检查 Date 列是否存在
+        if 'Date' not in df.columns:
+            # Date 可能在索引中
+            if hasattr(df.index, 'strftime'):
+                # 索引是 datetime，转换为字符串
+                date_series = df.index.strftime('%Y-%m-%d')
+                matching_idx = date_series == curr_date
+                if matching_idx.any():
+                    return df.loc[matching_idx, indicator].iloc[0]
+            return "N/A: Not a trading day (weekend or holiday)"
+        
+        # 使用精确匹配而不是 startswith
+        matching_rows = df[df["Date"] == curr_date]
 
         if not matching_rows.empty:
             indicator_value = matching_rows[indicator].values[0]
